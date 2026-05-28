@@ -2,11 +2,9 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/browser";
 
-// 회원가입 흐름:
-// - 초대 토큰(?invite=xxx) 있으면 해당 조직에 합류
-// - 없으면 신규 조직 + 본인을 owner로 생성 (첫 가입자 = 대표)
+// 단일 API 호출로 가입 + 로그인 + 조직 생성을 한 번에 처리합니다.
+// Supabase의 "Confirm email" 설정과 무관하게 즉시 로그인 상태가 됩니다.
 export default function SignupPage() {
   const router = useRouter();
   const search = useSearchParams();
@@ -24,24 +22,24 @@ export default function SignupPage() {
     setErr(null);
     setLoading(true);
 
-    const supabase = createClient();
-    const { data, error } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { full_name: fullName } },
-    });
-    if (error) { setErr(error.message); setLoading(false); return; }
-    if (!data.user) { setErr("가입에 실패했습니다."); setLoading(false); return; }
-
-    // 조직 생성/합류는 서버 라우트에서 처리 (RLS 우회 필요)
-    const res = await fetch("/api/auth/bootstrap", {
+    const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ orgName, inviteToken }),
+      body: JSON.stringify({
+        email, password, fullName,
+        orgName: inviteToken ? undefined : orgName,
+        inviteToken: inviteToken ?? undefined,
+      }),
     });
     const body = await res.json();
     setLoading(false);
-    if (!res.ok) { setErr(body.error ?? "조직 생성 실패"); return; }
+    if (!res.ok || !body.ok) {
+      setErr(body.error ?? `가입 실패 (${res.status})`);
+      return;
+    }
+    // 로그인까지 끝났으니 즉시 대시보드로
     router.push("/dashboard");
+    router.refresh();
   }
 
   return (
